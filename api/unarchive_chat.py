@@ -12,6 +12,14 @@ class UnarchiveChat(ApiHandler):
 
         found = unarchive_chat(chat_id)
 
+        # Trigger sidebar refresh so the restored chat reappears
+        if found:
+            try:
+                from helpers.state_monitor_integration import mark_dirty_all
+                mark_dirty_all(reason="chat_archive.unarchive")
+            except ImportError:
+                pass
+
         return {
             "ok": True,
             "chat_id": chat_id,

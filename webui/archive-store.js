@@ -78,8 +78,16 @@ const model = {
 
   async deleteArchivedChat(chatId) {
     try {
+      // First: remove from archive.json so ghost entries don't persist
+      await callJsonApi("/plugins/chat_archive/unarchive_chat", {
+        chat_id: chatId,
+      });
+
+      // Then: delete the chat context from the server
       const { sendJsonData } = await import("/index.js");
       await sendJsonData("/chat_remove", { context: chatId });
+
+      // Update local state
       const updated = { ...this.archived };
       delete updated[chatId];
       this.archived = updated;
