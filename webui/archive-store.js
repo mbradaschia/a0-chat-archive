@@ -80,6 +80,13 @@ const model = {
     try {
       const { sendJsonData } = await import("/index.js");
       await sendJsonData("/chat_remove", { context: chatId });
+      // Also drop the archive.json record on the backend. Without this, get_archived re-reads the
+      // file on reopen and the just-deleted chat reappears as a ghost. Best-effort.
+      try {
+        await callJsonApi("/plugins/chat_archive/unarchive_chat", { chat_id: chatId });
+      } catch (e2) {
+        console.error("[chat_archive] Failed to clear archive record on delete:", e2);
+      }
       const updated = { ...this.archived };
       delete updated[chatId];
       this.archived = updated;
@@ -167,12 +174,14 @@ const model = {
     containers.forEach((container) => {
       if (container.querySelector(".archive-btn")) return;
 
-      const li = container.closest("li");
-      if (!li) return;
-
+      // Read the row's Alpine scope via the public API and accept either
+      // iterator name: stock sidebar uses `context`, project_chat_view uses `chat`.
+      // Read from the container itself (not a wrapping <li>) so it works whether
+      // the row is an <li> (stock) or a <div class="pcv-chat-row"> (project_chat_view).
+      const scope = globalThis.Alpine?.$data?.(container) || {};
       const chatId =
-        li.__x_for_context?.id ||
-        li._x_dataStack?.[0]?.context?.id ||
+        scope.context?.id ||
+        scope.chat?.id ||
         container.dataset.chatId;
       if (!chatId) return;
 
@@ -211,16 +220,19 @@ const model = {
   _injectHeaderButton() {
     if (document.querySelector(".archive-header-btn")) return;
 
-    // Try project_sidebar's visible header row first, fall back to original
-    const headerRow =
-      document.querySelector(".project-sidebar-container .section-header-row") ||
-      document.querySelector(".chats-list-container .section-header-row");
+    // Anchor to the visible chats header. When a sidebar-replacement plugin
+    // (e.g. project_chat_view) is active it moves its own header to the start,
+    // so the first .section-header-row is the one actually on screen.
+    const headerRow = document.querySelector(
+      ".chats-list-container .section-header-row"
+    );
     if (!headerRow) return;
 
-    // project_sidebar uses #newChatProjectSidebar; original sidebar uses #newChat
+    // Match any new-chat button variant: #newChat (stock),
+    // #newChatProjectView (project_chat_view), #newChatProjectSidebar, …
     const newChatBtn =
-      headerRow.querySelector("#newChatProjectSidebar") ||
-      headerRow.querySelector("#newChat");
+      headerRow.querySelector('[id^="newChat"]') ||
+      headerRow.querySelector('button[title="New Chat"]');
     if (!newChatBtn) return;
 
     const btn = document.createElement("button");

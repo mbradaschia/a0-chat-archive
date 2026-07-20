@@ -1,7 +1,7 @@
 name: chat_archive
 title: Chat Archive
-description: Archive chats to hide them from the sidebar and manage archived chats in a modal with restore and delete options.
-version: 1.0.0
+description: Archive chats to hide them from the sidebar and manage archived chats in a modal with restore and delete options. Archiving also keeps a chat from Agent Zero's 24h API-chat auto-cleanup (restored when unarchived).
+version: 1.1.1
 settings_sections: []
 per_project_config: false
 per_agent_config: false

@@ -37,13 +37,37 @@ def _write_json(path: str, data: Any) -> None:
 # ── Archive operations ────────────────────────────────────────────
 
 
+def _chat_exists(chat_id: str) -> bool:
+    """True if the chat still exists on disk. Used to prune ghost archive records whose chat was
+    deleted/reaped elsewhere — otherwise a stale entry reappears in the archive list after a delete."""
+    try:
+        from helpers.persist_chat import get_chat_folder_path
+        return os.path.isdir(get_chat_folder_path(chat_id))
+    except Exception:
+        return os.path.isdir(os.path.join("/a0", "usr", "chats", chat_id))
+
+
 def get_archived() -> dict[str, dict[str, Any]]:
-    """Return dict of {chat_id: {archived_at: float, name: str}}."""
+    """Return dict of {chat_id: {archived_at: float, name: str}}. Self-healing: entries whose chat no
+    longer exists are pruned (and the file rewritten) so a deleted chat can't reappear as a ghost."""
     with _lock:
         raw = _read_json(_ARCHIVE_FILE)
         if not isinstance(raw, dict):
             return {}
-        return raw
+        live = {cid: meta for cid, meta in raw.items() if _chat_exists(cid)}
+        if len(live) != len(raw):
+            _write_json(_ARCHIVE_FILE, live)
+        return live
+
+
+def _apply_reap_protect(chat_id: str, archived: bool) -> None:
+    """Archive = keep the chat from the 24h API-chat reaper; unarchive = restore normal lifetime.
+    Lazy import so this helper stays standalone-importable; best-effort (never breaks archiving)."""
+    try:
+        from usr.plugins.chat_archive.helpers import reap_protect
+        (reap_protect.protect if archived else reap_protect.unprotect)(chat_id)
+    except Exception:
+        pass
 
 
 def archive_chat(chat_id: str, name: str = "") -> float:
@@ -55,20 +79,21 @@ def archive_chat(chat_id: str, name: str = "") -> float:
         ts = time.time()
         raw[chat_id] = {"archived_at": ts, "name": name}
         _write_json(_ARCHIVE_FILE, raw)
-        return ts
+    _apply_reap_protect(chat_id, True)   # archived -> keep from the reaper
+    return ts
 
 
 def unarchive_chat(chat_id: str) -> bool:
     """Remove a chat from the archive. Returns True if it was archived."""
     with _lock:
         raw = _read_json(_ARCHIVE_FILE)
-        if not isinstance(raw, dict):
-            return False
-        if chat_id not in raw:
-            return False
-        del raw[chat_id]
-        _write_json(_ARCHIVE_FILE, raw)
-        return True
+        found = isinstance(raw, dict) and chat_id in raw
+        if found:
+            del raw[chat_id]
+            _write_json(_ARCHIVE_FILE, raw)
+    if found:
+        _apply_reap_protect(chat_id, False)   # unarchived -> restore normal lifetime
+    return found
 
 
 def is_archived(chat_id: str) -> bool:
